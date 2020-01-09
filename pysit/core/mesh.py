@@ -75,8 +75,8 @@ class StructuredMesh(MeshBase):
         A variable number of integers specifying the number of points in each
         dimension.  One entry for each dimension.
 
-    Attribute
-    ---------
+    Attributes
+    ----------
 
     type : str
         class attribute, identifies the type of mesh as 'structured'
@@ -120,8 +120,8 @@ class CartesianMesh(StructuredMesh):
         A variable number of integers specifying the number of points in each
         dimension.  One entry for each dimension.
 
-    Attribute
-    ---------
+    Attributes
+    ----------
 
     type : str
         class attribute, identifies the type of mesh as 'structured-cartesian'
