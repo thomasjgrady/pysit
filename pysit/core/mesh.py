@@ -8,6 +8,8 @@ from pysit.util.parallel import ParallelWrapCartesianMeshBase
 from pysit.util.parallel import ParallelWrapCartesianMeshNull
 from pysit.util.parallel import ParallelWrapCartesianMesh
 
+from pysit.util.parallel import ParallelWrapCartesianNull
+
 __all__ = ['MeshBase', 'CartesianMesh',
            'StructuredNeumann', 'StructuredDirichlet', 'StructuredPML']
 
@@ -174,54 +176,34 @@ class CartesianMesh(StructuredMesh):
         """ String describing the type of mesh, e.g., structured."""
         return 'structured-cartesian'
 
-    def __init__(self, domain, *configs, solver_padding=1, pwrap=ParallelWrapCartesianMeshNull()):
+    def __init__(self, domain, *configs, pwrap=ParallelWrapCartesianNull()):
         
-        # This object needs a refernce to the parallel wrapper so that the mesh
-        # object's wrapper can be obtained by other functions
+        # Set parallel wrapper
         self.pwrap = pwrap
 
-        # If the parallel wrapper has size 1, then we don't need to do anything
-        if (pwrap.size > 1):
-            
-            # Create new domain based on mesh delta, for now we divide only on
-            # the z axis
+        # Keep a copy of global domain and global configs
+        self.domain_global  = domain
+        self.configs_global = configs
 
-            # Get the number of local elements
-            nz_global = configs[0]
-            nz_local  = nz_global // pwrap.size
-            remainder = nz_global % pwrap.size
-            if (pwrap.rank < remainder):
-                nz_local += 1
-            
-            # Get the length of the local domain. This is manually updated after
-            # construction, but is intentionally set to the wrong value at first
-            # for ease of creating the local domain
-            del_global = domain.parameters[0].length / (nz_global - 1)
-            lz_local   = (nz_local - 1) * del_global
+        # If we have a decomposition, split the mesh accordingly
+        if pwrap.size > 1:
+            assert(domain.dim == pwrap.dim, 'Decomposition and domain must have the same dimensionality')
 
-            # Get the offset of the start of the local domain relative to the
-            # start of the global domain
-            oz_local = nz_local * del_global * pwrap.rank if pwrap.rank < remainder else \
-                nz_local * del_global * pwrap.rank + remainder * del_global
-            
-            # Compute the left and right bounds of the local domain
-            lbound_local = domain.z.lbound + oz_local
-            rbound_local = lbound_local + lz_local
+            for (i, k) in _cart_keys[domain.dim]:
 
-            # Compute the left and right boundary conditions of the local
-            # domain
-            lbc_local = domain.z.lbc if pwrap.rank == 0 else \
-                    Ghost(comm=pwrap.comm, delta=del_global, ghost_padding=solver_padding)
-            rbc_local = domain.z.lbc if pwrap.rank == pwrap.size - 1 else \
-                    Ghost(comm=pwrap.comm, delta=del_global, ghost_padding=solver_padding)
+                # Get the number of subdomains in this dimension
+                subs = self.pwrap.dims[i]
 
-            # Assemble local domain
-            zconfig_local = (lbound_local, rbound_local, lbc_local, rbc_local)
-            domain = RectangularDomain(zconfig_local)
-            
-            lconfigs = list(configs)
-            lconfigs[0] = nz_local
-            configs = tuple(lconfigs)
+                # Get the current cart coords
+                coords = self.pwrap.cart_coords
+
+                # Compute decomposition. Note that the domain is purposefully
+                # set to be too short, to allow for every subdomain to have the
+                # same delta.
+                n_old = configs[i]
+                remainder = n_old % subs
+                n_new = n_old // coords[i] if coords[i] < remainder else n_old // coords[i] + 1
+                delta = domain.parameters[i].length / (n-1)
 
         # Initialize the base class
         StructuredMesh.__init__(self, domain, *configs)
@@ -936,3 +918,8 @@ class UnstructuredBCBase(MeshBCBase):
     """ [NotImplemented] Base class for specifying boundary conditions on
     unstructured meshes in PySIT.
     """
+
+if __name__ == '__main__':
+    from pysit.util.parallel import ParallelWrapCartesian
+    from pysit.core
+
