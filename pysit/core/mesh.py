@@ -2,6 +2,8 @@
 
 import numpy as np
 
+from pysit.util.parallel import ParallelWrapCartesianNull
+
 __all__ = ['MeshBase', 'CartesianMesh',
            'StructuredNeumann', 'StructuredDirichlet', 'StructuredPML']
 
@@ -168,7 +170,34 @@ class CartesianMesh(StructuredMesh):
         """ String describing the type of mesh, e.g., structured."""
         return 'structured-cartesian'
 
-    def __init__(self, domain, *configs):
+    def __init__(self, domain, *configs, pwrap=ParallelWrapCartesianNull()):
+        
+        # Set parallel wrapper
+        self.pwrap = pwrap
+
+        # Keep a copy of global domain and global configs
+        self.domain_global  = domain
+        self.configs_global = configs
+
+        # If we have a decomposition, split the mesh accordingly
+        if pwrap.size > 1:
+            assert(domain.dim == pwrap.dim, 'Decomposition and domain must have the same dimensionality')
+
+            for (i, k) in _cart_keys[domain.dim]:
+
+                # Get the number of subdomains in this dimension
+                subs = self.pwrap.dims[i]
+
+                # Get the current cart coords
+                coords = self.pwrap.cart_coords
+
+                # Compute decomposition. Note that the domain is purposefully
+                # set to be too short, to allow for every subdomain to have the
+                # same delta.
+                n_old = configs[i]
+                remainder = n_old % subs
+                n_new = n_old // coords[i] if coords[i] < remainder else n_old // coords[i] + 1
+                delta = domain.parameters[i].length / (n-1)
 
         # Initialize the base class
         StructuredMesh.__init__(self, domain, *configs)
@@ -884,3 +913,8 @@ class UnstructuredBCBase(MeshBCBase):
     """ [NotImplemented] Base class for specifying boundary conditions on
     unstructured meshes in PySIT.
     """
+
+if __name__ == '__main__':
+    from pysit.util.parallel import ParallelWrapCartesian
+    from pysit.core
+
