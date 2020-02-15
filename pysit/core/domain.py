@@ -290,3 +290,10 @@ class PML(DomainBC):
 #
 #       # candidate for sparse matrix
 #       return pml
+
+class Ghost(DomainBC):
+
+    type = 'ghost'
+
+    def __init__(self, pad, *args, **kwargs):
+        self.pad = pad
