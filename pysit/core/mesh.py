@@ -176,37 +176,89 @@ class CartesianMesh(StructuredMesh):
         """ String describing the type of mesh, e.g., structured."""
         return 'structured-cartesian'
 
-    def __init__(self, domain, *configs, pwrap=ParallelWrapCartesianNull()):
+    def __init__(self, domain, *configs, pwrap=ParallelWrapCartesianNull(), pads=None):
         
         # Set parallel wrapper
         self.pwrap = pwrap
 
         # Keep a copy of global domain and global configs
-        self.domain_global  = domain
-        self.configs_global = configs
+        self.domain_global = domain
+        self.domain_local  = domain
+        self.mesh_configs_global = configs
+        self.mesh_configs_local  = configs
 
+        # If no custom pads are passed, assume the solver has padding 1 in each
+        # direction
+        if pads is None:
+            self.pads = [(1, 1)] * domain.dim
+        else:
+            self.pads = pads
+    
         # If we have a decomposition, split the mesh accordingly
         if pwrap.size > 1:
-            assert(domain.dim == pwrap.dim, 'Decomposition and domain must have the same dimensionality')
+
+            from pysit.core.domain import RectangularDomain, Ghost
+                
+            # List to hold new domain configs
+            self.domain_configs_local = [None] * domain.dim
+            self.mesh_configs_local   = [None] * domain.dim
 
             for (i, k) in _cart_keys[domain.dim]:
 
                 # Get the number of subdomains in this dimension
                 subs = self.pwrap.dims[i]
 
-                # Get the current cart coords
-                coords = self.pwrap.cart_coords
+                # Get the cart coord in this dimension
+                coord = self.pwrap.cart_coords[i]
 
                 # Compute decomposition. Note that the domain is purposefully
                 # set to be too short, to allow for every subdomain to have the
-                # same delta.
+                # same delta. This is manually updated after the mesh is
+                # initialized
                 n_old = configs[i]
+                delta = domain.parameters[i].length / (n_old-1)
+
                 remainder = n_old % subs
-                n_new = n_old // coords[i] if coords[i] < remainder else n_old // coords[i] + 1
-                delta = domain.parameters[i].length / (n-1)
+                if coord < remainder:
+                    n_new = n_old // subs + 1
+                else: 
+                    n_new = n_old // subs
+
+                # Compute length, and left and right boundaries of decomp
+                length = n_new * delta
+                if coord < remainder:
+                    lbound = domain.parameters[i].lbound + coord * length
+                else:
+                    lbound = domain.parameters[i].lbound + (length + delta) * \
+                        remainder + length * (coord - remainder)
+                rbound = lbound + length - delta
+                
+                # If our neighbor is MPI_PROC_NULL, we know that we should keep
+                # the boundary condition in that direction, otherwise use a
+                # ghost boundary condition
+                if pwrap.neighbor_ranks[i][0] == -2:
+                    lbc = domain.parameters[i].lbc 
+                else:
+                    lbc = Ghost(self.pads[i][0])
+
+                if pwrap.neighbor_ranks[i][1] == -2:
+                    rbc = domain.parameters[i].lbc 
+                else:
+                    rbc = Ghost(self.pads[i][1])
+
+                # Create a configuration tuple and add it to the list
+                config = (lbound, rbound, lbc, rbc)
+                self.domain_configs_local[i] = config
+
+                print(f'Rank = {pwrap.cart_rank}, dim = {k}, domain config = {config}')
+
+                # Add the computed new n to the list
+                self.mesh_configs_local[i] = n_new
+
+            self.domain_local = RectangularDomain(*(self.domain_configs_local))
 
         # Initialize the base class
-        StructuredMesh.__init__(self, domain, *configs)
+        StructuredMesh.__init__(self, self.domain_local, *(self.mesh_configs_local))
 
         self.parameters = dict()
 
@@ -215,16 +267,16 @@ class CartesianMesh(StructuredMesh):
 
             # Create the initial parameter Bunch
             # n-1 because the number of points includes both boundaries.
-            n = int(configs[i])
-            delta = domain.parameters[i].length / (n-1)
+            n = int(self.mesh_configs_local[i])
+            delta = self.domain_local.parameters[i].length / (n-1)
             param = Bunch(n=n, delta=delta)
 
             # Create the left and right boundary specs from the MeshBC factory
             # Note, delta is necessary for some boundary constructions, but the
             # mesh has not been instantiated yet, so it must be passed to
             # the boundary constructor.
-            param.lbc = MeshBC(self, domain.parameters[i].lbc, i, 'left', delta)
-            param.rbc = MeshBC(self, domain.parameters[i].rbc, i, 'right', delta)
+            param.lbc = MeshBC(self, self.domain_local.parameters[i].lbc, i, 'left', delta)
+            param.rbc = MeshBC(self, self.domain_local.parameters[i].rbc, i, 'right', delta)
 
             # access the dimension data by index, key, or shortcut
             self.parameters[i] = param  # d.dim[-1]
@@ -906,8 +958,8 @@ class StructuredGhost(StructuredBCBase):
 
         StructuredBCBase.__init__(self, mesh, domain_bc, dim, side, *args, **kwargs)
 
-        self.solver_padding = domain_bc.ghost_padding
-        self._n = self.solver_padding
+        self.solver_padding = domain_bc.pad
+        self.ghost_padding  = domain_bc.pad
 
     n = property(lambda self: self.solver_padding,
                  None,
@@ -921,5 +973,23 @@ class UnstructuredBCBase(MeshBCBase):
 
 if __name__ == '__main__':
     from pysit.util.parallel import ParallelWrapCartesian
-    from pysit.core
+    from pysit.core.domain import RectangularDomain, PML
+    from mpi4py import MPI
+    
+    dims = (3, 3)
+    pwrap = ParallelWrapCartesian(dims=dims, comm=MPI.COMM_WORLD)
 
+    pmlx = PML(0.1, 100)
+    pmlz = PML(0.1, 100)
+    x_config = (0.1, 1.0, pmlx, pmlx)
+    z_config = (0.1, 0.8, pmlz, pmlz)
+    d = RectangularDomain(x_config, z_config)
+    m = CartesianMesh(d, 91, 71, pwrap=pwrap, pads=[(1, 1), (1, 1)])
+
+    pwrap.cart_comm.Barrier()
+    if pwrap.cart_rank == 0:
+        print()
+    pwrap.cart_comm.Barrier()
+
+    print(f'Rank = {pwrap.cart_rank}, Mesh unpadded shape = {m.shape(as_grid=True)}, \
+Mesh padded shape = {m.shape(as_grid=True, include_bc=True)}')

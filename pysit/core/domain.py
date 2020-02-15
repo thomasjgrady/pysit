@@ -292,28 +292,8 @@ class PML(DomainBC):
 #       return pml
 
 class Ghost(DomainBC):
-    """Physical ghost exchange boundary condition
-    
-    Parameters
-    ----------
-
-    delta : double
-        Rectangular domain grid spacing
-    
-    solver_padding : int
-        Padding needed by the solver. Usually solver_accuracy_order // 2
-    
-    """
 
     type = 'ghost'
 
-    def __init__(self, comm, delta, ghost_padding=1):
-
-        self.comm = comm
-        self.rank = comm.Get_rank()
-        self.size = comm.Get_size()
-
-        self.delta = delta
-        self.ghost_padding = ghost_padding
-        self.solver_padding = ghost_padding
-        self.length = self.delta * self.ghost_padding
+    def __init__(self, pad, *args, **kwargs):
+        self.pad = pad
