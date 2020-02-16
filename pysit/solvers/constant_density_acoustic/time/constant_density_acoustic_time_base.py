@@ -8,7 +8,10 @@ from ..constant_density_acoustic_base import *
 
 from pysit.util.solvers import inherit_dict
 
-from mpi4py import MPI
+try:
+    from mpi4py import MPI
+except ImportError:
+    pass
 
 __all__ = ['ConstantDensityAcousticTimeBase']
 
@@ -88,9 +91,3 @@ class ConstantDensityAcousticTimeBase(ConstantDensityAcousticBase):
 
     def time_step(self, solver_data, rhs, **kwargs):
         raise NotImplementedError("Function 'time_step' Must be implemented by subclass.")
-
-
-
-
-
-

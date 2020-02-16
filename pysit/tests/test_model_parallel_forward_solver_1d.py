@@ -74,3 +74,5 @@ if __name__ == '__main__':
     data = fwdret['simdata']
 
     clim = C.min(),C.max()
+
+    print(len(inc_field))
