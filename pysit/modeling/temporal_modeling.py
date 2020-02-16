@@ -1,7 +1,9 @@
 
 
 import numpy as np
+from pysit.util.communication import create_slices, create_buffers, ghost_exchange
 from pysit.util.derivatives import build_derivative_matrix, build_permutation_matrix, build_heterogenous_matrices
+from pysit.util.parallel import ParallelWrapCartesianNull
 from numpy.random import uniform
 
 __all__ = ['TemporalModeling']
@@ -57,7 +59,7 @@ class TemporalModeling(object):
     def _setup_forward_rhs(self, rhs_array, data):
         return self.solver.mesh.pad_array(data, out_array=rhs_array)
 
-    def forward_model(self, shot, m0, imaging_period=1, return_parameters=[]):
+    def forward_model(self, shot, m0, imaging_period=1, return_parameters=[], pwrap=ParallelWrapCartesianNull()):
         """Applies the forward model to the model for the given solver.
 
         Parameters
@@ -67,6 +69,8 @@ class TemporalModeling(object):
         m0 : solver.ModelParameters
             The parameters upon which to evaluate the forward model.
         return_parameters : list of {'wavefield', 'simdata', 'dWaveOp'}
+        pwrap : ParallelWrapCartesian
+            Wrapper for cartesian communicator
 
         Returns
         -------
@@ -107,6 +111,19 @@ class TemporalModeling(object):
         if 'dWaveOp' in return_parameters:
             dWaveOp = list()
 
+        # If we have model parallelism, create the slice objects and exchange
+        # buffers
+        if pwrap.size > 1:
+            pads = [None] * mesh.dim
+            for i in range(mesh.dim):
+                lpad = mesh.parameters[i].lbc.n
+                rpad = mesh.parameters[i].rbc.n
+                pads[i] = (lpad, rpad)
+            self.slices = create_slices(pads)
+            
+            mesh_shape = self.mesh.shape(as_grid=True, include_bc=True)
+            self.buffers = create_buffers(slices, mesh_shape)
+
         # Step k = 0
         # p_0 is a zero array because if we assume the input signal is causal
         # and we assume that the initial system (i.e., p_(-2) and p_(-1)) is
@@ -140,6 +157,10 @@ class TemporalModeling(object):
             # Note, we compute result for k+1 even when k == nsteps-1.  We need
             # it for the time derivative at k=nsteps-1.
             solver.time_step(solver_data, rhs_k, rhs_kp1)
+
+            # Perform a ghost exchange if model parallel
+            if pwrap.size > 1:
+                ghost_exchange(uk, slices, buffers, pwrap) 
 
             # Compute time derivative of p at time k
             # Note that this is is returned as a PADDED array
