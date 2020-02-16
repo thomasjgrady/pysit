@@ -73,6 +73,15 @@ if __name__ == '__main__':
     inc_field = fwdret['wavefield']
     data = fwdret['simdata']
 
-    clim = C.min(),C.max()
+    inc_field = pwrap.cart_comm.gather(inc_field, root=0)
 
-    print(len(inc_field))
+    if pwrap.cart_rank == 0:
+        clim = C.min(),C.max()
+        
+        plt.figure()
+        for i, f in enumerate(inc_field):
+            ax = plt.subplot(2, 2, i+1)
+            fa = np.squeeze(np.array(f))
+            plt.imshow(fa, cmap='gray')
+            ax.axis('square')
+        plt.show()
