@@ -8,6 +8,11 @@ from ..constant_density_acoustic_base import *
 
 from pysit.util.solvers import inherit_dict
 
+try:
+    from mpi4py import MPI
+except ImportError:
+    pass
+
 __all__ = ['ConstantDensityAcousticTimeBase']
 
 __docformat__ = "restructuredtext en"
@@ -64,6 +69,18 @@ class ConstantDensityAcousticTimeBase(ConstantDensityAcousticBase):
         dt = CFL*min_deltas / max_C
         nsteps = int(math.ceil((tf - t0)/dt))
 
+        # Here, in the case of a parallel mesh, the number of steps will
+        # sometimes be different between ranks. Thus, if we have more than one
+        # worker we need to do a reduction to make nsteps the max across all
+        # ranks, thus ensuring that the CFL safety condition holds for each
+        # rank.
+        if self.mesh.type == 'structured-cartesian':
+            if self.mesh.pwrap.size > 1:
+                sendbuf = np.array(nsteps, dtype='i')
+                recvbuf = np.array(0     , dtype='i')
+                self.mesh.pwrap.comm.Allreduce(sendbuf, recvbuf, op=MPI.MAX) 
+                nsteps = recvbuf
+
         self.dt = dt
         self.nsteps = nsteps
 
@@ -74,9 +91,3 @@ class ConstantDensityAcousticTimeBase(ConstantDensityAcousticBase):
 
     def time_step(self, solver_data, rhs, **kwargs):
         raise NotImplementedError("Function 'time_step' Must be implemented by subclass.")
-
-
-
-
-
-
