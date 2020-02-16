@@ -59,7 +59,7 @@ class TemporalModeling(object):
     def _setup_forward_rhs(self, rhs_array, data):
         return self.solver.mesh.pad_array(data, out_array=rhs_array)
 
-    def forward_model(self, shot, m0, imaging_period=1, return_parameters=[], pwrap=ParallelWrapCartesianNull()):
+    def forward_model(self, shot, m0, imaging_period=1, return_parameters=[]):
         """Applies the forward model to the model for the given solver.
 
         Parameters
@@ -93,6 +93,7 @@ class TemporalModeling(object):
         solver.model_parameters = m0
 
         mesh = solver.mesh
+        pwrap = mesh.pwrap
 
         d = solver.domain
         dt = solver.dt
@@ -118,11 +119,16 @@ class TemporalModeling(object):
             for i in range(mesh.dim):
                 lpad = mesh.parameters[i].lbc.n
                 rpad = mesh.parameters[i].rbc.n
-                pads[i] = (lpad, rpad)
+                pads[i] = (1, 1)
             self.slices = create_slices(pads)
             
-            mesh_shape = self.mesh.shape(as_grid=True, include_bc=True)
-            self.buffers = create_buffers(slices, mesh_shape)
+            mesh_shape = mesh.shape(as_grid=True, include_bc=True)
+            self.buffers = create_buffers(self.slices, mesh_shape)
+
+            print(f'rank = {pwrap.cart_rank}, lbulk buf len = {len(self.buffers[0][0])}')
+            print(f'rank = {pwrap.cart_rank}, rbulk buf len = {len(self.buffers[0][1])}')
+            print(f'rank = {pwrap.cart_rank}, lghost buf len = {len(self.buffers[0][2])}')
+            print(f'rank = {pwrap.cart_rank}, rghost buf len = {len(self.buffers[0][3])}')
 
         # Step k = 0
         # p_0 is a zero array because if we assume the input signal is causal
@@ -137,6 +143,13 @@ class TemporalModeling(object):
         for k in range(nsteps):
 
             uk = solver_data.k.primary_wavefield
+
+            # Perform a ghost exchange if model parallel
+            if pwrap.size > 1:
+                uk = np.reshape(uk, mesh.shape(as_grid=True, include_bc=True))
+                ghost_exchange(uk, self.slices, self.buffers, pwrap) 
+                uk = np.reshape(uk, mesh.shape(as_grid=False, include_bc=True))
+
             uk_bulk = mesh.unpad_array(uk)
 
             if 'wavefield' in return_parameters:
@@ -158,9 +171,6 @@ class TemporalModeling(object):
             # it for the time derivative at k=nsteps-1.
             solver.time_step(solver_data, rhs_k, rhs_kp1)
 
-            # Perform a ghost exchange if model parallel
-            if pwrap.size > 1:
-                ghost_exchange(uk, slices, buffers, pwrap) 
 
             # Compute time derivative of p at time k
             # Note that this is is returned as a PADDED array

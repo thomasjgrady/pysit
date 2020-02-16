@@ -173,16 +173,16 @@ def ghost_exchange(a, slices, buffers, pwrap):
         # Send data
         lrank = pwrap.neighbor_ranks[i][0]
         rrank = pwrap.neighbor_ranks[i][1]
-        if lrank != -2:
-            lbulk_send_req  = comm.Isend(lbulk_buffer, dest=lrank, tag=i)
-            lghost_recv_req = comm.Irecv(lghost_buffer, source=lrank, tag=i+dim)
-            reqs.append(lbulk_send_req)
-            reqs.append(lghost_recv_req)
-        if rrank != -2:
-            rbulk_send_req  = comm.Isend(rbulk_buffer, dest=rrank, tag=i+dim)
-            rghost_recv_req = comm.Irecv(rghost_buffer, source=rrank, tag=i)
-            reqs.append(rbulk_send_req)
-            reqs.append(rghost_recv_req)
+
+        lbulk_send_req  = comm.Isend(lbulk_buffer, dest=lrank, tag=i)
+        lghost_recv_req = comm.Irecv(lghost_buffer, source=lrank, tag=i+dim)
+        reqs.append(lbulk_send_req)
+        reqs.append(lghost_recv_req)
+
+        rbulk_send_req  = comm.Isend(rbulk_buffer, dest=rrank, tag=i+dim)
+        rghost_recv_req = comm.Irecv(rghost_buffer, source=rrank, tag=i)
+        reqs.append(rbulk_send_req)
+        reqs.append(rghost_recv_req)
 
     # Perform communication
     MPI.Request.Waitall(reqs)
@@ -190,17 +190,18 @@ def ghost_exchange(a, slices, buffers, pwrap):
     # Unpack data
     for (i, _) in _cart_keys[dim]:
 
-        # Get bulk and ghost region shapes
-        lghost_shape = a[slices[i][2]].shape
-        rghost_shape = a[slices[i][3]].shape
-
-        # Get bulk and ghost region buffers
-        lghost_buffer = buffers[i][2]
-        rghost_buffer = buffers[i][3]
-
         # Copy data
-        np.copyto(a[slices[i][2]], lghost_buffer.reshape(lghost_shape))
-        np.copyto(a[slices[i][3]], rghost_buffer.reshape(rghost_shape))
+        lrank = pwrap.neighbor_ranks[i][0]
+        rrank = pwrap.neighbor_ranks[i][1]
+        
+        if lrank != -2:
+            lghost_shape = a[slices[i][2]].shape
+            lghost_buffer = buffers[i][2]
+            np.copyto(a[slices[i][2]], lghost_buffer.reshape(lghost_shape))
+        if rrank != -2:
+            rghost_shape = a[slices[i][3]].shape
+            rghost_buffer = buffers[i][3]
+            np.copyto(a[slices[i][3]], rghost_buffer.reshape(rghost_shape))
 
 
 if __name__ == '__main__':
