@@ -79,9 +79,13 @@ if __name__ == '__main__':
         clim = C.min(),C.max()
         
         plt.figure()
+        field_final = None
         for i, f in enumerate(inc_field):
-            ax = plt.subplot(2, 2, i+1)
-            fa = np.squeeze(np.array(f))
-            plt.imshow(fa, cmap='gray')
-            ax.axis('square')
+            if field_final is None:
+                field_final = np.flip(np.squeeze(np.array(f)), axis=0)
+            else:
+                field_final = np.hstack((field_final,
+                    np.flip(np.squeeze(np.array(f)), axis=0)))
+        plt.imshow(field_final, cmap='gray')
+        plt.gca().set_aspect(0.05)
         plt.show()
