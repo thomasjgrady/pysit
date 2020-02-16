@@ -209,15 +209,15 @@ if __name__ == '__main__':
 
     np.set_printoptions(suppress=True, linewidth=200)
 
-    dims = (3, 3)
+    dims = (2, 2, 2)
     pwrap = ParallelWrapCartesian(dims=dims)
     rank = pwrap.cart_rank
 
-    pads = [(1, 1), (1, 1)]
+    pads = [(1, 2), (1, 2), (1, 2)]
     fill_value = (pwrap.cart_rank + 1) * 10 ** -(pwrap.cart_rank)
     pad_value = (pwrap.cart_rank + 1) * 10
 
-    a = np.full(shape=(5, 5), fill_value=fill_value, dtype=float)
+    a = np.full(shape=(5, 5, 5), fill_value=fill_value, dtype=float)
     a = np.pad(a, pad_width=pads, mode='constant', constant_values=pad_value)
 
     slices = create_slices(pads)
@@ -242,5 +242,5 @@ if __name__ == '__main__':
 
     ghost_exchange(a, slices, buffers, pwrap)
 
-    if rank == 4:
+    if rank == 0:
         print(a)

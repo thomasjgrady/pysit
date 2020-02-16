@@ -244,8 +244,6 @@ class CartesianMesh(StructuredMesh):
                 config = (lbound, rbound, lbc, rbc)
                 self.domain_configs_local[i] = config
 
-                print(f'Rank = {pwrap.cart_rank}, dim = {k}, domain config = {config}')
-
                 # Add the computed new n to the list
                 self.mesh_configs_local[i] = n_new
 
