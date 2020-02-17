@@ -124,12 +124,7 @@ class TemporalModeling(object):
             
             mesh_shape = mesh.shape(as_grid=True, include_bc=True)
             self.buffers = create_buffers(self.slices, mesh_shape)
-
-            print(f'rank = {pwrap.cart_rank}, lbulk buf len = {len(self.buffers[0][0])}')
-            print(f'rank = {pwrap.cart_rank}, rbulk buf len = {len(self.buffers[0][1])}')
-            print(f'rank = {pwrap.cart_rank}, lghost buf len = {len(self.buffers[0][2])}')
-            print(f'rank = {pwrap.cart_rank}, rghost buf len = {len(self.buffers[0][3])}')
-
+            
         # Step k = 0
         # p_0 is a zero array because if we assume the input signal is causal
         # and we assume that the initial system (i.e., p_(-2) and p_(-1)) is
