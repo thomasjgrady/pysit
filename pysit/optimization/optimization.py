@@ -324,6 +324,8 @@ class OptimizationBase(object):
 
         """
 
+        pwrap = self.solver.mesh.pwrap
+
         for step in range(steps):
             # Zeroth step is always the initial condition.
             tt = time.time()
@@ -331,7 +333,7 @@ class OptimizationBase(object):
 
             self.store_history('value', i, self.base_model)
 
-            self._print('Iteration {0}'.format(i))
+            self._print('rank {0}, Iteration {0}'.format(pwrap.cart_rank, i))
 
             self.solver.model_parameters = self.base_model
 
@@ -346,20 +348,20 @@ class OptimizationBase(object):
             # Compute the gradient    
             gradient = self.objective_function.compute_gradient(shots, self.base_model, aux_info=aux_info, **objective_arguments)
             objective_value = aux_info['objective_value'][1]
-            
+
             # Process and store meta data about the gradient
             self.store_history('gradient', i, gradient)
             gradient_norm = gradient.norm()
-            self._print('  gradnorm {0}'.format(gradient_norm))
+            self._print('rank {0}, gradnorm {1}'.format(pwrap.cart_rank, gradient_norm))
             self.store_history('gradient_length', i, gradient_norm)
 
             if aux_info['objective_value'][1] is not None:
                 self.store_history('objective', i, aux_info['objective_value'][1])
-                self._print('  objective {0}'.format(aux_info['objective_value'][1]))
+                self._print('rank {0}, objective {1}'.format(pwrap.cart_rank, aux_info['objective_value'][1]))
 
             if aux_info['residual_norm'][1] is not None:
                 self.store_history('residual_length', i, aux_info['residual_norm'][1])
-                self._print('  residual {0}'.format(aux_info['residual_norm'][1]))
+                self._print('rank {0}, residual {1}'.format(pwrap.cart_rank, aux_info['residual_norm'][1]))
 
             # Compute step modifier
             step = self._select_step(shots, objective_value, gradient, i, objective_arguments, **kwargs)
@@ -377,7 +379,7 @@ class OptimizationBase(object):
 
             self.iteration += 1
 
-            self._print('  run time {0}s'.format(ttt))
+            self._print('rank {0}, run time {1}s'.format(pwrap.cart_rank, ttt))
 
     def _select_step(self, shots, current_objective_value, gradient, iteration, objective_arguments, **kwargs):
         raise NotImplementedError("_select_step must be implemented by a subclass.")
@@ -463,6 +465,9 @@ class OptimizationBase(object):
         myalpha0_kwargs.update({'upscale_factor' : geom_fac_up})
 
         alpha = self._compute_alpha0(current_objective_value, gradient, **myalpha0_kwargs)
+
+        if alpha < 1e-5:
+            print(f'rank {self.solver.mesh.pwrap.cart_rank} found step size < 1e-5')
 
         stop = False
         itercnt = 1
