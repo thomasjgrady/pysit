@@ -87,8 +87,16 @@ if __name__ == '__main__':
             r3 = np.concatenate(inc_field_arrs[6:],  axis=1)
             
             fields.append(np.concatenate([r1, r2, r3], axis=0))
+        
+        l = len(fields)
 
         fig = plt.figure()
-        ax = plt.gca()
-        im = ax.imshow(fields[-1], cmap='plasma')
+        plt.subplot(2, 2, 1)
+        plt.imshow(fields[0], cmap='plasma')
+        plt.subplot(2, 2, 2)
+        plt.imshow(fields[l//3], cmap='plasma')
+        plt.subplot(2, 2, 3)
+        plt.imshow(fields[(2*l)//3], cmap='plasma')
+        plt.subplot(2, 2, 4)
+        plt.imshow(fields[-1], cmap='plasma')
         plt.show()
