@@ -3,7 +3,6 @@
 import numpy as np
 
 from pysit.objective_functions.objective_function import ObjectiveFunctionBase
-from pysit.util.communication import create_slices, create_buffers, ghost_exchange
 from pysit.util.parallel import ParallelWrapShotNull
 from pysit.modeling.temporal_modeling import TemporalModeling
 
@@ -22,16 +21,8 @@ class TemporalLeastSquares(ObjectiveFunctionBase):
         self.modeling_tools = TemporalModeling(solver)
 
         self.parallel_wrap_shot = parallel_wrap_shot
-        self.parallel_wrap_cart = self.solver.mesh.pwrap
 
         self.imaging_period = int(imaging_period) #Needs to be an integer
-
-        # If we are model parallel, precompute exchange buffers
-        if self.parallel_wrap_cart.size > 1:
-            self.pads = [(1, 1)] * self.solver.mesh.dim
-            self.slices = compute_slices(self.pads)
-            self.buffers = compute_buffers(self.slices, self.solver.mesh.shape(as_grid=True))
-
 
     def _residual(self, shot, m0, dWaveOp=None, wavefield=None):
         """Computes residual in the usual sense.
@@ -203,14 +194,6 @@ class TemporalLeastSquares(ObjectiveFunctionBase):
             aux_info['objective_value'] = (True, 0.5*r_norm2)
         if ('pseudo_hess_diag' in aux_info) and aux_info['pseudo_hess_diag'][0]:
             aux_info['pseudo_hess_diag'] = (True, pseudo_h_diag)
-        
-        mesh_shape = self.solver.mesh.shape(as_grid=True)
-        pwrap = self.solver.mesh.pwrap
-        
-        if pwrap.size > 1:
-            grad_data = grad.data
-            grad_data = np.reshape(grad_data, mesh_shape)
-
 
         return grad
 

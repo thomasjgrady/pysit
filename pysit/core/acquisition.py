@@ -94,11 +94,8 @@ def equispaced_acquisition(mesh, wavelet,
             source = PointSource(m, srcpos, wavelet, **source_kwargs)
 
             # Define set of receivers
-            if m.dim == 2:
-                receivers = ReceiverSet(m, [PointReceiver(m, (x, receiver_depth), **receiver_kwargs) for x in xpos])
-            if m.dim == 3:
-                receivers = ReceiverSet(m, [PointReceiver(m, (x, y, receiver_depth), **receiver_kwargs) for x in xpos for y in ypos]) 
-            
+            receivers = copy.deepcopy(receiversbase)
+
             # Create and store the shot
             shot = Shot(source, receivers)
             shots.append(shot)
