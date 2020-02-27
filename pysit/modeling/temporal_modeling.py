@@ -1,9 +1,7 @@
 
 
 import numpy as np
-from pysit.util.communication import create_slices, create_buffers, ghost_exchange
 from pysit.util.derivatives import build_derivative_matrix, build_permutation_matrix, build_heterogenous_matrices
-from pysit.util.parallel import ParallelWrapCartesianNull
 from numpy.random import uniform
 
 __all__ = ['TemporalModeling']
@@ -91,7 +89,6 @@ class TemporalModeling(object):
         solver.model_parameters = m0
 
         mesh = solver.mesh
-        pwrap = mesh.pwrap
 
         d = solver.domain
         dt = solver.dt
@@ -110,19 +107,6 @@ class TemporalModeling(object):
         if 'dWaveOp' in return_parameters:
             dWaveOp = list()
 
-        # If we have model parallelism, create the slice objects and exchange
-        # buffers
-        if pwrap.size > 1:
-            pads = [None] * mesh.dim
-            for i in range(mesh.dim):
-                lpad = mesh.parameters[i].lbc.n
-                rpad = mesh.parameters[i].rbc.n
-                pads[i] = (1, 1)
-            self.slices = create_slices(pads)
-            
-            mesh_shape = mesh.shape(as_grid=True, include_bc=True)
-            self.buffers = create_buffers(self.slices, mesh_shape)
-            
         # Step k = 0
         # p_0 is a zero array because if we assume the input signal is causal
         # and we assume that the initial system (i.e., p_(-2) and p_(-1)) is
@@ -136,14 +120,6 @@ class TemporalModeling(object):
         for k in range(nsteps):
 
             uk = solver_data.k.primary_wavefield
-
-            # Perform a ghost exchange if model parallel
-            # if k == 0:
-            #     if pwrap.size > 1:
-            #         uk = np.reshape(uk, mesh.shape(as_grid=True, include_bc=True))
-            #         ghost_exchange(uk, self.slices, self.buffers, pwrap) 
-            #         uk = np.reshape(uk, mesh.shape(as_grid=False, include_bc=True))
-
             uk_bulk = mesh.unpad_array(uk)
 
             if 'wavefield' in return_parameters:
@@ -164,13 +140,6 @@ class TemporalModeling(object):
             # Note, we compute result for k+1 even when k == nsteps-1.  We need
             # it for the time derivative at k=nsteps-1.
             solver.time_step(solver_data, rhs_k, rhs_kp1)
-
-            # Perform a ghost exchange if model parallel
-            if pwrap.size > 1:
-                ukp1 = solver_data.kp1.primary_wavefield
-                ukp1 = np.reshape(ukp1, mesh.shape(as_grid=True, include_bc=True))
-                ghost_exchange(ukp1, self.slices, self.buffers, pwrap) 
-                ukp1 = np.reshape(ukp1, mesh.shape(as_grid=False, include_bc=True))
 
             # Compute time derivative of p at time k
             # Note that this is is returned as a PADDED array
@@ -301,7 +270,6 @@ class TemporalModeling(object):
         solver.model_parameters = m0
 
         mesh = solver.mesh
-        pwrap = mesh.pwrap
 
         d = solver.domain
         dt = solver.dt
@@ -332,19 +300,6 @@ class TemporalModeling(object):
             sh = mesh.shape(include_bc=True, as_grid=True)
             D1, D2 = build_heterogenous_matrices(sh, deltas)
 
-        # If we have model parallelism, create the slice objects and exchange
-        # buffers
-        if pwrap.size > 1:
-            pads = [None] * mesh.dim
-            for i in range(mesh.dim):
-                lpad = mesh.parameters[i].lbc.n
-                rpad = mesh.parameters[i].rbc.n
-                pads[i] = (1, 1)
-            self.slices = create_slices(pads)
-            
-            mesh_shape = mesh.shape(as_grid=True, include_bc=True)
-            self.buffers = create_buffers(self.slices, mesh_shape)
-        
         # Time-reversed wave solver
         solver_data = solver.SolverData()
 
@@ -393,13 +348,6 @@ class TemporalModeling(object):
                 rhs_km1, shot, k-1, operand_simdata, operand_model, operand_dWaveOpAdj)
 
             solver.time_step(solver_data, rhs_k, rhs_km1)
-
-            # Perform a ghost exchange if model parallel
-            if pwrap.size > 1:
-                vkp1 = solver_data.kp1.primary_wavefield
-                vkp1 = np.reshape(vkp1, mesh.shape(as_grid=True, include_bc=True))
-                ghost_exchange(vkp1, self.slices, self.buffers, pwrap) 
-                vkp1 = np.reshape(vkp1, mesh.shape(as_grid=False, include_bc=True))
 
             # Compute time derivative of p at time k
             if 'dWaveOpAdj' in return_parameters:
@@ -474,7 +422,6 @@ class TemporalModeling(object):
         solver.model_parameters = m0
 
         mesh = solver.mesh
-        pwrap = mesh.pwrap
 
         d = solver.domain
         dt = solver.dt
@@ -498,19 +445,6 @@ class TemporalModeling(object):
 
         if 'dWaveOp1' in return_parameters:
             dWaveOp1 = list()
-
-        # If we have model parallelism, create the slice objects and exchange
-        # buffers
-        if pwrap.size > 1:
-            pads = [None] * mesh.dim
-            for i in range(mesh.dim):
-                lpad = mesh.parameters[i].lbc.n
-                rpad = mesh.parameters[i].rbc.n
-                pads[i] = (1, 1)
-            self.slices = create_slices(pads)
-            
-            mesh_shape = mesh.shape(as_grid=True, include_bc=True)
-            self.buffers = create_buffers(self.slices, mesh_shape)
 
         # Step k = 0
         # p_0 is a zero array because if we assume the input signal is causal
@@ -546,13 +480,6 @@ class TemporalModeling(object):
 
         for k in range(nsteps):
             uk = solver_data.k.primary_wavefield
-
-            # Perform a ghost exchange if model parallel
-            if pwrap.size > 1:
-                uk = np.reshape(uk, mesh.shape(as_grid=True, include_bc=True))
-                ghost_exchange(uk, self.slices, self.buffers, pwrap) 
-                uk = np.reshape(uk, mesh.shape(as_grid=False, include_bc=True))
-
             uk_bulk = mesh.unpad_array(uk)
 
             if 'wavefield1' in return_parameters:
