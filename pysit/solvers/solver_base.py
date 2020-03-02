@@ -109,8 +109,11 @@ class SolverBase(object):
         if type(mp) is self.ModelParameters:
             if self._mp is None or np.linalg.norm(self._mp.without_padding().data - mp.data) != 0.0:
                 self._mp = mp.with_padding(padding_mode='edge')
-
+                if self.mesh.pwrap.size > 1:
+                    print(f'rank = {self.mesh.pwrap.cart_rank}, padded mp')
                 self._process_mp_reset()
+                if self.mesh.pwrap.size > 1:
+                    print(f'rank = {self.mesh.pwrap.cart_rank}, processed mp reset')
 
                 self._model_change_count += 1
         else:

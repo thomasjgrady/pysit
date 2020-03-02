@@ -45,6 +45,8 @@ class ConstantDensityAcousticTimeBase(ConstantDensityAcousticBase):
         self.dt = 0.0
         self.nsteps = 0
 
+        self.nsteps_has_been_reset = False
+
         ConstantDensityAcousticBase.__init__(self,
                                              mesh,
                                              trange=trange,
@@ -67,7 +69,10 @@ class ConstantDensityAcousticTimeBase(ConstantDensityAcousticBase):
         max_C = max(abs(C.min()), C.max())  # faster than C.abs().max()
 
         dt = CFL*min_deltas / max_C
-        nsteps = int(math.ceil((tf - t0)/dt))
+        if not self.nsteps_has_been_reset:
+            nsteps = int(math.ceil((tf - t0)/dt))
+        else:
+            nsteps = self.nsteps
 
         # Here, in the case of a parallel mesh, the number of steps will
         # sometimes be different between ranks. Thus, if we have more than one
@@ -76,10 +81,11 @@ class ConstantDensityAcousticTimeBase(ConstantDensityAcousticBase):
         # rank.
         if self.mesh.type == 'structured-cartesian':
             if self.mesh.pwrap.size > 1:
-                sendbuf = np.array(nsteps, dtype='i')
-                recvbuf = np.array(0     , dtype='i')
-                self.mesh.pwrap.comm.Allreduce(sendbuf, recvbuf, op=MPI.MAX) 
-                nsteps = recvbuf
+                if not self.nsteps_has_been_reset:
+                    nsteps = self.mesh.pwrap.comm.allreduce(nsteps, op=MPI.MAX) 
+                    self.nsteps_has_been_reset = True
+
+                
 
         self.dt = dt
         self.nsteps = nsteps

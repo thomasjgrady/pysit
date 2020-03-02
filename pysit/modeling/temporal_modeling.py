@@ -1,8 +1,12 @@
-
-
 import numpy as np
+from pysit.util.communication import create_slices, create_buffers, ghost_exchange
 from pysit.util.derivatives import build_derivative_matrix, build_permutation_matrix, build_heterogenous_matrices
 from numpy.random import uniform
+
+try:
+    from mpi4py import MPI
+except:
+    pass
 
 __all__ = ['TemporalModeling']
 
@@ -53,6 +57,12 @@ class TemporalModeling(object):
         else:
             raise TypeError("Argument 'solver' type {1} does not match modeling solver type {0}.".format(
                 self.solver_type, solver.supports['equation_dynamics']))
+
+        self.pwrap = self.solver.mesh.pwrap
+        if self.pwrap.size > 1:
+            self.pads = [(1, 1)] * self.pwrap.dim     # Just for now, assume padding 1
+            self.slices = create_slices(self.pads)
+            self.buffers = create_buffers(self.slices, self.solver.mesh.shape(as_grid=True, include_bc=True))
 
     def _setup_forward_rhs(self, rhs_array, data):
         return self.solver.mesh.pad_array(data, out_array=rhs_array)
@@ -141,6 +151,12 @@ class TemporalModeling(object):
             # it for the time derivative at k=nsteps-1.
             solver.time_step(solver_data, rhs_k, rhs_kp1)
 
+            # Perform a ghost exchange after time step
+            if self.pwrap.size > 1:
+                ukp1 = np.reshape(solver_data.kp1.primary_wavefield, mesh.shape(as_grid=True, include_bc=True))
+                ghost_exchange(ukp1, self.slices, self.buffers, self.pwrap)
+                solver_data.kp1.primary_wavefield = np.reshape(ukp1, mesh.shape(as_grid=False, include_bc=True))
+
             # Compute time derivative of p at time k
             # Note that this is is returned as a PADDED array
             if 'dWaveOp' in return_parameters:
@@ -165,13 +181,15 @@ class TemporalModeling(object):
             retval['dWaveOp'] = dWaveOp
         if 'simdata' in return_parameters:
             retval['simdata'] = simdata
+            if self.pwrap.size > 1:
+                retval['simdata'] = self.pwrap.cart_comm.allreduce(retval['simdata'], op=MPI.SUM)
 
         return retval
 
     def migrate_shot(self, shot, m0,
                      operand_simdata, imaging_period, operand_dWaveOpAdj=None, operand_model=None,
                      dWaveOp=None,
-                     adjointfield=None, dWaveOpAdj=None, wavefield=None):
+                     adjointfield=None, dWaveOpAdj=None, wavefield=None, padded=False):
         """Performs migration on a single shot.
 
         Parameters
@@ -201,6 +219,9 @@ class TemporalModeling(object):
         rv = self.adjoint_model(shot, m0, operand_simdata, imaging_period, operand_dWaveOpAdj,
                                 operand_model, return_parameters=rp, dWaveOp=dWaveOp, wavefield=wavefield)
 
+        
+
+
         # If the adjoint field is desired as output.
         if adjointfield is not None:
             adjointfield[:] = rv['adjointfield'][:]
@@ -210,8 +231,11 @@ class TemporalModeling(object):
         # Get the imaging condition part from the result, this is the migrated image.
         ic = rv['imaging_condition']
 
-        # imaging condition is padded, but migration yields an unpadded return
-        return ic.without_padding()
+        if padded:
+            return ic.with_padding()
+        else:
+            # imaging condition is padded, but migration yields an unpadded return
+            return ic.without_padding()
 
     def _setup_adjoint_rhs(self, rhs_array, shot, k, operand_simdata, operand_model, operand_dWaveOpAdj):
 
@@ -348,6 +372,12 @@ class TemporalModeling(object):
                 rhs_km1, shot, k-1, operand_simdata, operand_model, operand_dWaveOpAdj)
 
             solver.time_step(solver_data, rhs_k, rhs_km1)
+
+            # Perform a ghost exchange after time step
+            if self.pwrap.size > 1:
+                ukp1 = np.reshape(solver_data.kp1.primary_wavefield, mesh.shape(as_grid=True, include_bc=True))
+                ghost_exchange(ukp1, self.slices, self.buffers, self.pwrap)
+                solver_data.kp1.primary_wavefield = np.reshape(ukp1, mesh.shape(as_grid=False, include_bc=True))
 
             # Compute time derivative of p at time k
             if 'dWaveOpAdj' in return_parameters:
@@ -517,6 +547,12 @@ class TemporalModeling(object):
                 rhs_k, rhs_kp1 = rhs_kp1, m1_padded*(-1*dWaveOp0_kp1)
 
             solver.time_step(solver_data, rhs_k, rhs_kp1)
+
+            # Perform a ghost exchange after time step
+            if self.pwrap.size > 1:
+                ukp1 = np.reshape(solver_data.kp1.primary_wavefield, mesh.shape(as_grid=True, include_bc=True))
+                ghost_exchange(ukp1, self.slices, self.buffers, self.pwrap)
+                solver_data.kp1.primary_wavefield = np.reshape(ukp1, mesh.shape(as_grid=False, include_bc=True))
 
             # Compute time derivative of p at time k
             if 'dWaveOp1' in return_parameters:

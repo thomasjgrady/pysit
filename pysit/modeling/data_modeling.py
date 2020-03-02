@@ -8,6 +8,13 @@ import shutil #folder deletion
 
 from scipy.interpolate import interp1d
 
+from pysit.util.communication import create_slices, create_buffers, ghost_exchange
+
+try:
+    from mpi4py import MPI
+except:
+    pass
+
 import os
 
 __all__ = ['generate_seismic_data', 'generate_seismic_data_from_file', 'generate_shot_data_time', 'generate_shot_data_frequency']
@@ -356,6 +363,12 @@ def generate_shot_data_time(shot, solver, model, wavefields=None, wavefields_pad
 
     """
 
+    pwrap = solver.mesh.pwrap
+    if pwrap.size > 1:
+        pads = [(1, 1)] * pwrap.dim     # Just for now, assume padding 1
+        slices = create_slices(pads)
+        buffers = create_buffers(slices, solver.mesh.shape(as_grid=True, include_bc=True))
+
     solver.model_parameters = model
 
     # Ensure that the receiver data is empty.  And that interpolator is setup.
@@ -423,10 +436,20 @@ def generate_shot_data_time(shot, solver, model, wavefields=None, wavefields_pad
         # Given the state at k and k-1, compute the state at k+1
         solver.time_step(solver_data, rhs_k, rhs_kp1)
 
+        if pwrap.size > 1:
+            ukp1 = np.reshape(solver_data.kp1.primary_wavefield, mesh.shape(as_grid=True, include_bc=True))
+            ghost_exchange(ukp1, slices, buffers, pwrap)
+            solver_data.kp1.primary_wavefield = np.reshape(ukp1, mesh.shape(as_grid=False, include_bc=True))
+
         # Don't know what data is needed for the solver, so the solver data
         # handles advancing everything forward by one time step.
         # k-1 <-- k, k <-- k+1, etc
         solver_data.advance()
+
+    if pwrap.size > 1:
+        # Perform a reduction after ghost exchange
+        shot.receivers.data = pwrap.cart_comm.allreduce(shot.receivers.data, op=MPI.SUM)
+
 
 def generate_shot_data_frequency(shot, solver, model, frequencies, verbose=False, **kwargs):
         """most of this is copied from frequency_modeling.forward_model

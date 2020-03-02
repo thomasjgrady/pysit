@@ -3,8 +3,14 @@
 import numpy as np
 
 from pysit.objective_functions.objective_function import ObjectiveFunctionBase
+from pysit.util.communication import create_slices, create_buffers, ghost_exchange
 from pysit.util.parallel import ParallelWrapShotNull
 from pysit.modeling.temporal_modeling import TemporalModeling
+
+try:
+    from mpi4py import MPI
+except:
+    pass
 
 __all__ = ['TemporalLeastSquares']
 
@@ -24,7 +30,17 @@ class TemporalLeastSquares(ObjectiveFunctionBase):
 
         self.imaging_period = int(imaging_period) #Needs to be an integer
 
-    def _residual(self, shot, m0, dWaveOp=None, wavefield=None):
+        self.mesh = self.solver.mesh
+        self.pwrap = self.mesh.pwrap
+
+        if self.pwrap.size > 1:
+            self.mesh_shape_padded = self.mesh.shape(as_grid=True, include_bc=True)
+            self.mesh_shape_unpadded = self.mesh.shape(as_grid=True, include_bc=False)
+            self.pads = [(1, 1)] * self.pwrap.dim
+            self.slices = create_slices(self.pads)
+            self.buffers = create_buffers(self.slices, self.mesh_shape_padded)
+
+    def _residual(self, shot, m0, dWaveOp=None, rank_str='', step_str='', wavefield=None):
         """Computes residual in the usual sense.
 
         Parameters
@@ -51,10 +67,14 @@ class TemporalLeastSquares(ObjectiveFunctionBase):
         # Run the forward modeling step
         retval = self.modeling_tools.forward_model(shot, m0, self.imaging_period, return_parameters=rp)
 
+        print(rank_str + step_str + 'computed forward model')
+
         # Compute the residual vector by interpolating the measured data to the
         # timesteps used in the previous forward modeling stage.
         # resid = map(lambda x,y: x.interpolate_data(self.solver.ts())-y, shot.gather(), retval['simdata'])
         resid = shot.receivers.interpolate_data(self.solver.ts()) - retval['simdata']
+
+        print(rank_str + step_str + 'interpolated data')
 
         # If the second derivative info is needed, copy it out
         if dWaveOp is not None:
@@ -81,7 +101,7 @@ class TemporalLeastSquares(ObjectiveFunctionBase):
 
         return 0.5*r_norm2*self.solver.dt
 
-    def _gradient_helper(self, shot, m0, ignore_minus=False, ret_pseudo_hess_diag_comp = False, **kwargs):
+    def _gradient_helper(self, shot, m0, ignore_minus=False, ret_pseudo_hess_diag_comp=False, rank_str='', step_str='', **kwargs):
         """Helper function for computing the component of the gradient due to a
         single shot.
 
@@ -106,9 +126,26 @@ class TemporalLeastSquares(ObjectiveFunctionBase):
             wavefield=None
             
         r = self._residual(shot, m0, dWaveOp=dWaveOp, wavefield=wavefield, **kwargs)
+        print(rank_str + step_str + 'caculated residual')
+
+        if self.pwrap.size > 1:
+            padded = True
+        else:
+            padded = False
         
         # Perform the migration or F* operation to get the gradient component
-        g = self.modeling_tools.migrate_shot(shot, m0, r, self.imaging_period, dWaveOp=dWaveOp, wavefield=wavefield)
+        g = self.modeling_tools.migrate_shot(shot, m0, r, self.imaging_period, dWaveOp=dWaveOp, wavefield=wavefield, padded=padded)
+
+        print(rank_str + step_str + 'migrated shot')
+
+        if self.pwrap.size > 1:
+            s = g.data.shape
+            g_data_reshaped = np.reshape(g.data, self.mesh_shape_padded)
+            ghost_exchange(g_data_reshaped, self.slices, self.buffers, self.pwrap)
+            g.data = np.reshape(g_data_reshaped, s)
+            g = g.without_padding()
+
+        print(rank_str + step_str + 'exchanged gradient')
 
         if not ignore_minus:
             g = -1*g
@@ -138,7 +175,7 @@ class TemporalLeastSquares(ObjectiveFunctionBase):
 
         return pseudo_hessian_diag_contrib
 
-    def compute_gradient(self, shots, m0, aux_info={}, **kwargs):
+    def compute_gradient(self, shots, m0, aux_info={}, rank_str='', step_str='', **kwargs):
         """Compute the gradient for a set of shots.
 
         Computes the gradient as
@@ -155,14 +192,19 @@ class TemporalLeastSquares(ObjectiveFunctionBase):
 
         # compute the portion of the gradient due to each shot
         grad = m0.perturbation()
+        print(rank_str + step_str + 'created perturbation')
         r_norm2 = 0.0
         pseudo_h_diag = np.zeros(m0.asarray().shape)
         for shot in shots:
             if ('pseudo_hess_diag' in aux_info) and aux_info['pseudo_hess_diag'][0]:
-                g, r, h = self._gradient_helper(shot, m0, ignore_minus=True, ret_pseudo_hess_diag_comp = True, **kwargs)
+                g, r, h = self._gradient_helper(shot, m0, ignore_minus=True, ret_pseudo_hess_diag_comp=True,
+                    rank_str=rank_str, step_str=step_str, **kwargs)
                 pseudo_h_diag += h 
             else:
-                g, r = self._gradient_helper(shot, m0, ignore_minus=True, **kwargs)
+                g, r = self._gradient_helper(shot, m0, ignore_minus=True, 
+                    rank_str=rank_str, step_str=step_str, **kwargs)
+
+            print(rank_str + step_str + 'called gradient helper')
             
             grad -= g # handle the minus 1 in the definition of the gradient of this objective
             r_norm2 += np.linalg.norm(r)**2

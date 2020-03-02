@@ -130,6 +130,44 @@ class ParallelWrapCartesian(ParallelWrapCartesianBase):
                 rrank = self.cart_comm.Get_cart_rank(rcoords)
 
             self.neighbor_ranks[i] = [lrank, rrank]
+    
+    def split_discrete(self, vals):
+        """
+        Splits a list of integers vals along each of the axes
+
+        Parameters
+        ----------
+
+        vals : list of integers
+            List of values to split. Must be the same dimension as the cartesian
+            topology
+
+        Returns
+        -------
+
+        ns : List of integers
+            List of split values
+
+        os: List of integers
+            List of offsets of split values
+        """
+
+        ns = list()
+        os = list()
+
+        for c, d, v in zip(self.cart_coords, self.dims, vals):
+            r = v % d
+            if c < r:
+                n = v // d + 1
+                o = n * c
+            else:
+                n = v // d
+                o = r * (n + 1) + (c - r) * n
+            ns.append(n)
+            os.append(o)
+
+        return ns, os
+
 
 if __name__ == '__main__':
 
