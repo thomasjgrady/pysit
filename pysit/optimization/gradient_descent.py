@@ -18,7 +18,7 @@ class GradientDescent(OptimizationBase):
         OptimizationBase.__init__(self, objective, *args, **kwargs)
         self.prev_alpha = None
 
-    def _select_step(self, shots, current_objective_value, gradient, iteration, objective_arguments, **kwargs):
+    def _select_step(self, shots, current_objective_value, gradient, iteration, objective_arguments, rank_str='', step_str='', **kwargs):
         """Compute the adjustment of the gradient step for a set of shots.
 
         Gives the step s as a scalar multiple of the gradient vector.
@@ -43,9 +43,9 @@ class GradientDescent(OptimizationBase):
 
         alpha = self.select_alpha(shots, gradient, direction, objective_arguments,
                                   current_objective_value=current_objective_value,
-                                  alpha0_kwargs=alpha0_kwargs, **kwargs)
+                                  alpha0_kwargs=alpha0_kwargs, rank_str=rank_str, step_str=step_str, **kwargs)
 
-        self._print('  alpha {0}'.format(alpha))
+        self._print(rank_str + step_str + 'alpha = {0}'.format(alpha))
         self.store_history('alpha', iteration, alpha)
 
         step = alpha * direction

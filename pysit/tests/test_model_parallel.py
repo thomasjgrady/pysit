@@ -1,99 +1,140 @@
 from mpi4py import MPI
-
-import matplotlib.pyplot as plt
-import numpy as np
-
 from pysit import *
-from pysit.core.mesh import CartesianMesh
 from pysit.gallery import horizontal_reflector
-from pysit.modeling.temporal_modeling_parallel import TemporalModelingParallel
-from pysit.util.parallel import ParallelWrapCartesianMesh
+from pysit.util.parallel import ParallelWrapCartesian
 
-def test_model_parallel_forward_solver():
+import numpy as np
+import matplotlib.pyplot as plt
+import time
+
+MODEL_PARALLEL = True
+
+def test_full_solver(test_num):
     
-    # Left and right bounds of global domain
-    lbound = 0.1
-    rbound = 0.7
+    # Define a parallel decomposition
+    dims = (2, 2)
+    pwrap = ParallelWrapCartesian(dims=dims, comm=MPI.COMM_WORLD)
+    rank = pwrap.cart_rank
+    size = pwrap.size
 
-    # Left and right boundary conditions of global domain
-    bczl = PML(0.1, 100, ftype='quadratic')
-    bczr = PML(0.1, 100, ftype='quadratic')
-
-    # Configuration tuple for global domain
-    zconfig = (lbound, rbound, bczl, bczr)
-
-    # Create global domain
-    domain = RectangularDomain(zconfig)
-
-    # Need to define solver accuracy order and padding before declaring domain
-    # decomposed mesh so that ghost boundary conditions can be calculated
-    # correctly
-    solver_accuracy_order = 2
-    solver_padding = solver_accuracy_order // 2
-
-    # Create a parallel mesh
-    pwrap = ParallelWrapCartesianMesh(comm=MPI.COMM_WORLD)
-    m  = CartesianMesh(domain, 301, solver_padding=solver_padding, pwrap=pwrap)
+    # Create a global domain and mesh. This is a hack and would not be included
+    # in the final version of any codes, but makes creating the sampling operators
+    # correctly less difficult
+    pmlx = PML(0.1, 100)
+    pmlz = PML(0.1, 100)
+    x_config = (0.1, 1.0, pmlx, pmlx)
+    z_config = (0.1, 0.8, pmlz, pmlz)
     
-    # Set up horizontal reflector problem
-    C, C0, m, d = horizontal_reflector(m)
-    
-    # Set up source and receiver
-    zpos = 0.2
-    source = PointSource(m, (zpos), RickerWavelet(25.0))
-    receiver = PointReceiver(m, (zpos))
+    nx = 101
+    nz = 101
+    d_global = RectangularDomain(x_config, z_config)
+    m_global = CartesianMesh(d_global, nx, nz)
 
-    shot = Shot(source, receiver)
-    shots = list()
-    shots.append(shot)
+
+    if MODEL_PARALLEL:
+        # Set up local mesh
+        m = CartesianMesh(d_global, nx, nz, pwrap=pwrap)
+
+        #   Generate true wave speed in the global domain
+        C_global, C0_global, m_global, d_global = horizontal_reflector(m_global)
+        
+        # Get the relevant section of the true wave speed and initial guess on this
+        # rank
+        ns, os = pwrap.split_discrete([nx, nz])
+        print(f'test = {test_num}, rank = {rank}, ns = {ns}, os = {os}')
+        print(f'rank = {rank}, shape = {m.shape(as_grid=True, include_bc=False)}')
+        
+        sls = list()
+        for n, o in zip(ns, os):
+            sls.append(slice(o, o + n, 1))
+        sls = tuple(sls)
+
+        C  = np.reshape(C_global,  m_global.shape(as_grid=True, include_bc=False))[sls]
+        C0 = np.reshape(C0_global, m_global.shape(as_grid=True, include_bc=False))[sls]
+        C  = np.reshape(C,  m.shape(as_grid=False, include_bc=False))
+        C0 = np.reshape(C0, m.shape(as_grid=False, include_bc=False))
+
+    else:
+        C = C_global
+        C0 = C0_global
+        m = m_global
+        d = d_global
+
+    # Set up shots
+    zmin = d_global.z.lbound
+    zmax = d_global.z.rbound
+    zpos = zmin + (1./9.)*zmax
+
+    n_receivers = 10
+    source = PointSource(m, (zpos, zpos), RickerWavelet(25.0))
+    receivers = ReceiverSet(m, [PointReceiver(m, (x, zpos)) for x in np.linspace(0.1, 1.0, n_receivers)])
+    shots = [Shot(source, receivers)]
 
     # Define and configure the wave solver
     trange = (0.0,3.0)
+
     solver = ConstantDensityAcousticWave(m,
                                          formulation='scalar',
-                                         kernel_implementation='numpy',
-                                         spatial_accuracy_order=solver_accuracy_order,
+                                         spatial_accuracy_order=2,
                                          trange=trange)
 
-    print('Generating data...')
-    wavefields = []
-    base_model = solver.ModelParameters(m, {'C': C})
-    generate_seismic_data(shots, solver, base_model, wavefields=wavefields)
+    # Generate synthetic Seismic data
+    print(f'rank = {rank}, generating data...')
+    base_model = solver.ModelParameters(m,{'C': C})
+    tt = time.time()
+    wavefields1 =  []
+    generate_seismic_data(shots, solver, base_model, wavefields=wavefields1)
+    print(f'rank = {rank}, data generation took {(time.time()-tt)} s')
 
-    tools = TemporalModelingParallel(solver)
-    m0 = solver.ModelParameters(m, {'C': C0})
+    # Define and configure the objective function
+    objective = TemporalLeastSquares(solver)
 
-    fwdret = tools.forward_model(shot, m0, return_parameters=['wavefield', 'dWaveOp', 'simdata'])
-    dWaveOp0 = fwdret['dWaveOp']
-    inc_field = fwdret['wavefield']
-    data = fwdret['simdata']
+    # Define the inversion algorithm
+    invalg = GradientDescent(objective)
+    
+    # invalg = GradientDescent(objective)
+    initial_value = solver.ModelParameters(m, {'C': C0}, padded=False)
 
-    # Getthe incedent field as an array
-    field = np.array(inc_field)
-    field = np.squeeze(field)
-    field = np.flip(field, axis=0)
+    # Execute inversion algorithm
+    print(f'rank = {rank}, running descent...')
+    tt = time.time()
 
+    nsteps = 20
 
-    data = {'field':field} 
-    data = pwrap.comm.gather(data, root=0)
+    status_configuration = {'value_frequency'           : 1,
+                            'residual_length_frequency' : 1,
+                            'objective_frequency'       : 1,
+                            'step_frequency'            : 1,
+                            'step_length_frequency'     : 1,
+                            'gradient_frequency'        : 1,
+                            'gradient_length_frequency' : 1,
+                            'run_time_frequency'        : 1,
+                            'alpha_frequency'           : 1,
+                            }
 
-    if pwrap.rank == 0:
-        
-        field_all = field
-        for i in range(1, pwrap.size):
+    invalg.max_linesearch_iterations=10
 
-            field_curr = data[i]['field']
-            if field_curr.shape[0] != field_all.shape[0]:
-                field_curr = field_curr[:-1,:]
+    result = invalg(shots, initial_value, nsteps, verbose=True, status_configuration=status_configuration)
 
-            field_all = np.hstack((field_all, field_curr))
-        
-        plt.figure()
-        plt.imshow(field_all, cmap='gray')
-        ax = plt.gca()
-        ax.set_aspect(0.05)
-        
-        plt.show()
+    print(f'rank = {rank}, run time {time.time()-tt}')
+
+    obj_vals = np.array([v for k,v in list(invalg.objective_history.items())])
+
+    result_model = np.reshape(result.C, m.shape(as_grid=True, include_bc=False))
+
+    title_string = 'Inversion result'
+    if MODEL_PARALLEL:
+        title_string += f' on rank {rank}'
+
+    plt.figure()
+    plt.title(title_string)
+    plt.imshow(result_model)
+    plt.show()
+
 
 if __name__ == '__main__':
-    test_model_parallel_forward_solver()
+    
+    test = 0
+    test_full_solver(test)
+    test += 1
+    

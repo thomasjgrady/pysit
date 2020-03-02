@@ -7,6 +7,11 @@ import copy
 
 import numpy as np
 
+try:
+    from mpi4py import MPI 
+except:
+    pass
+
 __all__=['OptimizationBase']
 
 __docformat__ = "restructuredtext en"
@@ -83,6 +88,8 @@ class OptimizationBase(object):
         self.max_linesearch_iterations = 10
 
         self.logfile = sys.stdout
+
+        self.pwrap = self.solver.mesh.pwrap
 
 
     def reset(self,
@@ -224,6 +231,7 @@ class OptimizationBase(object):
         if self.verbose:
             print(*args, file=self.logfile)
 
+
 #   #### Actual optimization stuff below...
 
     def initialize(self, initial_value, **kwargs):
@@ -324,16 +332,29 @@ class OptimizationBase(object):
 
         """
 
+        rank = self.pwrap.cart_rank
+        if self.pwrap.size > 1:
+            rank_str = f'rank = {rank}, '
+        else:
+            rank_str = ''
+
+
         for step in range(steps):
             # Zeroth step is always the initial condition.
             tt = time.time()
             i = self.iteration
 
+            step_str = f'step = {step}, '
+
             self.store_history('value', i, self.base_model)
 
-            self._print('Iteration {0}'.format(i))
+            self._print(rank_str + step_str + 'stored history')
+
+            self._print(rank_str + step_str + 'Iteration {0}'.format(i))
 
             self.solver.model_parameters = self.base_model
+
+            self._print(rank_str + step_str + 'updated model parameters')
 
             # extra data to try to extract from gradient call
             aux_info = {'objective_value': (True, None),
@@ -343,26 +364,31 @@ class OptimizationBase(object):
             # pass information for the solver type
             objective_arguments.update(kwargs)
 
+            self._print(rank_str + step_str + 'updated objective arguments')
+
             # Compute the gradient    
-            gradient = self.objective_function.compute_gradient(shots, self.base_model, aux_info=aux_info, **objective_arguments)
+            gradient = self.objective_function.compute_gradient(shots, self.base_model, aux_info=aux_info, 
+                rank_str=rank_str, step_str=step_str, **objective_arguments)
             objective_value = aux_info['objective_value'][1]
+
+            self._print(rank_str + step_str + 'computed gradient')
             
             # Process and store meta data about the gradient
             self.store_history('gradient', i, gradient)
             gradient_norm = gradient.norm()
-            self._print('  gradnorm {0}'.format(gradient_norm))
+            self._print(rank_str + step_str + 'gradnorm {0}'.format(gradient_norm))
             self.store_history('gradient_length', i, gradient_norm)
 
             if aux_info['objective_value'][1] is not None:
                 self.store_history('objective', i, aux_info['objective_value'][1])
-                self._print('  objective {0}'.format(aux_info['objective_value'][1]))
+                self._print(rank_str + step_str + 'objective {0}'.format(aux_info['objective_value'][1]))
 
             if aux_info['residual_norm'][1] is not None:
                 self.store_history('residual_length', i, aux_info['residual_norm'][1])
-                self._print('  residual {0}'.format(aux_info['residual_norm'][1]))
+                self._print(rank_str + step_str + 'residual {0}'.format(aux_info['residual_norm'][1]))
 
             # Compute step modifier
-            step = self._select_step(shots, objective_value, gradient, i, objective_arguments, **kwargs)
+            step = self._select_step(shots, objective_value, gradient, i, objective_arguments, rank_str=rank_str, step_str=step_str, **kwargs)
 
             # Process and store meta data about the step
             step_len = step.norm()
@@ -377,7 +403,7 @@ class OptimizationBase(object):
 
             self.iteration += 1
 
-            self._print('  run time {0}s'.format(ttt))
+            self._print(rank_str + step_str + 'run time {0}s'.format(ttt))
 
     def _select_step(self, shots, current_objective_value, gradient, iteration, objective_arguments, **kwargs):
         raise NotImplementedError("_select_step must be implemented by a subclass.")
@@ -446,7 +472,9 @@ class OptimizationBase(object):
 
     def _backtrack_line_search(self, shots, gradient, direction, objective_arguments,
                                         current_objective_value=None,
-                                        alpha0_kwargs={}, **kwargs):
+                                        alpha0_kwargs={}, rank_str='', step_str='', **kwargs):
+
+
 
         geom_fac = 0.8
         geom_fac_up = 0.7
@@ -466,7 +494,7 @@ class OptimizationBase(object):
 
         stop = False
         itercnt = 1
-        self._print("  Starting: ".format(itercnt), alpha, fk)
+        self._print(rank_str + step_str + "starting: ".format(itercnt), alpha, fk)
         while not stop:
             # Cut the initial alpha until it is as large as can be and still satisfy the valid conditions for an updated model.
             valid=False
@@ -485,18 +513,27 @@ class OptimizationBase(object):
 
             cmpval = fk + alpha * goldstein_c * gradient.inner_product(tdir)
 
-            self._print("  Pass {0}: a:{1}; {2} ?<= {3}".format(itercnt, alpha, fkp1, cmpval))
+            self._print(rank_str + step_str + "pass {0}: a:{1}; {2} ?<= {3}".format(itercnt, alpha, fkp1, cmpval))
 
             if (fkp1 <= cmpval) or ((abs(fkp1-cmpval)/abs(fkp1)) <= fp_comp): # reasonable floating point cutoff
                 stop = True
             elif itercnt > self.max_linesearch_iterations:
                 stop = True
-                self._print('Too many passes ({0}), attempting to use current alpha ({1}).'.format(itercnt, alpha))
+                self._print(rank_str + step_str + 'too many passes ({0}), attempting to use current alpha ({1}).'.format(itercnt, alpha))
             else:
                 itercnt += 1
                 alpha = alpha * geom_fac
 
+            # We need to communicate the stopping criteria between ranks to prevent idle processes. Using the LOR
+            # (logical or) operation assumes that each rank will reach a reasonable alpha at around the same time.
+            # If this is not the case, using the LAND (logical and) operation will likely produce better results,
+            # but will cause ranks to be idle.
+            if self.pwrap.size > 1:
+                stop = self.pwrap.cart_comm.allreduce(stop, op=MPI.LOR)
+
         self.prev_alpha = alpha
+
+        self._print(rank_str + step_str + f'prev alpha = {self.prev_alpha}')
 
         return alpha
 
