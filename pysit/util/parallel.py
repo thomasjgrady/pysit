@@ -61,6 +61,8 @@ class ParallelWrapCartesianNull(ParallelWrapCartesianBase):
         self.size = 1
         self.rank = 0
 
+        self.cart_rank = 0
+
 class ParallelWrapCartesian(ParallelWrapCartesianBase):
     """
     Class for wrapping an MPI communicator for cartesian topologies
