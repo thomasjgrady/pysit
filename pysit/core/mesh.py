@@ -4,10 +4,7 @@ import numpy as np
 from pysit.core.domain import Dirichlet
 from pysit.core.domain import Ghost
 from pysit.core.domain import RectangularDomain
-from pysit.util.parallel import ParallelWrapCartesianMeshBase
-from pysit.util.parallel import ParallelWrapCartesianMeshNull
-from pysit.util.parallel import ParallelWrapCartesianMesh
-
+from pysit.util.parallel import ParallelWrapCartesian
 from pysit.util.parallel import ParallelWrapCartesianNull
 
 __all__ = ['MeshBase', 'CartesianMesh',
