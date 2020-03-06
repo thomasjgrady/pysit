@@ -7,6 +7,8 @@ from pysit.core.domain import RectangularDomain
 from pysit.util.parallel import ParallelWrapCartesian
 from pysit.util.parallel import ParallelWrapCartesianNull
 
+from pysit.util.parallel import ParallelWrapCartesianNull
+
 __all__ = ['MeshBase', 'CartesianMesh',
            'StructuredNeumann', 'StructuredDirichlet', 'StructuredPML']
 
