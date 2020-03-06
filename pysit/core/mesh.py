@@ -10,6 +10,8 @@ from pysit.util.parallel import ParallelWrapCartesianMesh
 
 from pysit.util.parallel import ParallelWrapCartesianNull
 
+from pysit.util.parallel import ParallelWrapCartesianNull
+
 __all__ = ['MeshBase', 'CartesianMesh',
            'StructuredNeumann', 'StructuredDirichlet', 'StructuredPML']
 
