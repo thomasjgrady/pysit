@@ -189,7 +189,7 @@ class TemporalModeling(object):
     def migrate_shot(self, shot, m0,
                      operand_simdata, imaging_period, operand_dWaveOpAdj=None, operand_model=None,
                      dWaveOp=None,
-                     adjointfield=None, dWaveOpAdj=None, wavefield=None, padded=False):
+                     adjointfield=None, dWaveOpAdj=None, wavefield=None):
         """Performs migration on a single shot.
 
         Parameters
@@ -220,8 +220,6 @@ class TemporalModeling(object):
                                 operand_model, return_parameters=rp, dWaveOp=dWaveOp, wavefield=wavefield)
 
         
-
-
         # If the adjoint field is desired as output.
         if adjointfield is not None:
             adjointfield[:] = rv['adjointfield'][:]
@@ -231,11 +229,7 @@ class TemporalModeling(object):
         # Get the imaging condition part from the result, this is the migrated image.
         ic = rv['imaging_condition']
 
-        if padded:
-            return ic.with_padding()
-        else:
-            # imaging condition is padded, but migration yields an unpadded return
-            return ic.without_padding()
+        return ic.without_padding()
 
     def _setup_adjoint_rhs(self, rhs_array, shot, k, operand_simdata, operand_model, operand_dWaveOpAdj):
 
@@ -375,9 +369,9 @@ class TemporalModeling(object):
 
             # Perform a ghost exchange after time step
             if self.pwrap.size > 1:
-                ukp1 = np.reshape(solver_data.kp1.primary_wavefield, mesh.shape(as_grid=True, include_bc=True))
-                ghost_exchange(ukp1, self.slices, self.buffers, self.pwrap)
-                solver_data.kp1.primary_wavefield = np.reshape(ukp1, mesh.shape(as_grid=False, include_bc=True))
+                vkp1 = np.reshape(solver_data.kp1.primary_wavefield, mesh.shape(as_grid=True, include_bc=True))
+                ghost_exchange(vkp1, self.slices, self.buffers, self.pwrap)
+                solver_data.kp1.primary_wavefield = np.reshape(vkp1, mesh.shape(as_grid=False, include_bc=True))
 
             # Compute time derivative of p at time k
             if 'dWaveOpAdj' in return_parameters:
@@ -398,7 +392,7 @@ class TemporalModeling(object):
             ic *= (-1*dt)
             ic *= imaging_period  # Compensate for doing fewer summations at higher imaging_period
             # ic = ic.without_padding() # gradient is never padded comment by Zhilong
-            ic = ic.add_padding()
+            # ic = ic.add_padding()
 
         retval = dict()
 

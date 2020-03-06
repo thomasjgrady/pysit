@@ -127,25 +127,9 @@ class TemporalLeastSquares(ObjectiveFunctionBase):
             
         r = self._residual(shot, m0, dWaveOp=dWaveOp, wavefield=wavefield, **kwargs)
         print(rank_str + step_str + 'caculated residual')
-
-        if self.pwrap.size > 1:
-            padded = True
-        else:
-            padded = False
         
         # Perform the migration or F* operation to get the gradient component
-        g = self.modeling_tools.migrate_shot(shot, m0, r, self.imaging_period, dWaveOp=dWaveOp, wavefield=wavefield, padded=padded)
-
-        print(rank_str + step_str + 'migrated shot')
-
-        if self.pwrap.size > 1:
-            s = g.data.shape
-            g_data_reshaped = np.reshape(g.data, self.mesh_shape_padded)
-            ghost_exchange(g_data_reshaped, self.slices, self.buffers, self.pwrap)
-            g.data = np.reshape(g_data_reshaped, s)
-            g = g.without_padding()
-
-        print(rank_str + step_str + 'exchanged gradient')
+        g = self.modeling_tools.migrate_shot(shot, m0, r, self.imaging_period, dWaveOp=dWaveOp, wavefield=wavefield)
 
         if not ignore_minus:
             g = -1*g

@@ -1,21 +1,31 @@
 from mpi4py import MPI
 from pysit import *
 from pysit.gallery import horizontal_reflector
-from pysit.util.parallel import ParallelWrapCartesian
+from pysit.util.parallel import ParallelWrapCartesian, ParallelWrapCartesianNull
 
 import numpy as np
 import matplotlib.pyplot as plt
+from mpi4py import MPI
 import time
 
-MODEL_PARALLEL = True
+
 
 def test_full_solver(test_num):
     
-    # Define a parallel decomposition
-    dims = (2, 2)
-    pwrap = ParallelWrapCartesian(dims=dims, comm=MPI.COMM_WORLD)
-    rank = pwrap.cart_rank
-    size = pwrap.size
+    MODEL_PARALLEL = True
+
+    if MPI.COMM_WORLD.size > 1:
+        
+        # Define a parallel decomposition
+        dims = (2, 2)
+        pwrap = ParallelWrapCartesian(dims=dims, comm=MPI.COMM_WORLD)
+
+        rank = pwrap.cart_rank
+        size = pwrap.size
+    else:
+        pwrap = ParallelWrapCartesianNull()
+        rank = 0
+        MODEL_PARALLEL = False
 
     # Create a global domain and mesh. This is a hack and would not be included
     # in the final version of any codes, but makes creating the sampling operators
@@ -29,15 +39,15 @@ def test_full_solver(test_num):
     nz = 101
     d_global = RectangularDomain(x_config, z_config)
     m_global = CartesianMesh(d_global, nx, nz)
+    
+    #   Generate true wave speed in the global domain
+    C_global, C0_global, m_global, d_global = horizontal_reflector(m_global)
 
+    # Set up local mesh
+    m = CartesianMesh(d_global, nx, nz, pwrap=pwrap)
 
     if MODEL_PARALLEL:
-        # Set up local mesh
-        m = CartesianMesh(d_global, nx, nz, pwrap=pwrap)
 
-        #   Generate true wave speed in the global domain
-        C_global, C0_global, m_global, d_global = horizontal_reflector(m_global)
-        
         # Get the relevant section of the true wave speed and initial guess on this
         # rank
         ns, os = pwrap.split_discrete([nx, nz])
@@ -57,7 +67,7 @@ def test_full_solver(test_num):
     else:
         C = C_global
         C0 = C0_global
-        m = m_global
+        #m = m_global
         d = d_global
 
     # Set up shots
@@ -99,7 +109,7 @@ def test_full_solver(test_num):
     print(f'rank = {rank}, running descent...')
     tt = time.time()
 
-    nsteps = 20
+    nsteps = 1
 
     status_configuration = {'value_frequency'           : 1,
                             'residual_length_frequency' : 1,
@@ -123,14 +133,18 @@ def test_full_solver(test_num):
     result_model = np.reshape(result.C, m.shape(as_grid=True, include_bc=False))
 
     title_string = 'Inversion result'
+    fname = 'invtest'
     if MODEL_PARALLEL:
         title_string += f' on rank {rank}'
+        fname += f'_{rank}'
+    fname += '.png'
+    
+    clim = C.min(),C.max()
 
     plt.figure()
     plt.title(title_string)
-    plt.imshow(result_model)
+    vis.plot(result.C, m, clim=clim)
     plt.show()
-
 
 if __name__ == '__main__':
     
